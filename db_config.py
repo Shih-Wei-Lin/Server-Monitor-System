@@ -27,7 +27,7 @@ class DefaultConfig(object):
     
     # 執行檔案路徑
     FILE_PATH = "c:/Users/monitor/Desktop/Monitor/Python/package/"
-    FILE_EXTRACT = "server_update_to_db_ip_info_fome_db_ssh_pool_check_connect.py"
+    FILE_EXTRACT = "Update_status_V0.2.py"
     FILE_CHECK_CONNECT = "Check_conective.py"
     
     LIBRARY_IP = "http://192.168.1.80"
