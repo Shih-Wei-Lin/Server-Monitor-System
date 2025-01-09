@@ -31,6 +31,6 @@ class DefaultConfig(object):
     FILE_CHECK_CONNECT = "Check_conective.py"
     
     LIBRARY_IP = "http://192.168.1.80"
-    GIT_IP = ""
+    GIT_IP = ""#Can seeting your own website
     FILE_STATION_PAGE =""
     BULLETIN_BOARD=""
