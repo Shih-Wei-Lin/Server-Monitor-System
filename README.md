@@ -6,3 +6,6 @@ This project primarily uses OpenSSH to communicate and interact with a group of 
 - OpenSSH
 - MySQL
 - Python
+# function
+Update_V2.py
+- use openssh connect to server,use cmd to get CPU resource
