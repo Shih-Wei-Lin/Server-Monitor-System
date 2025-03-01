@@ -4,6 +4,7 @@ import aiomysql
 from datetime import datetime
 from db_config import DefaultConfig
 import re
+from contextlib import asynccontextmanager
 
 # 配置信息
 USERNAME = DefaultConfig.DEFAULT_USERNAME
@@ -18,27 +19,61 @@ db_config = {
     'autocommit': DefaultConfig.AUTO_COMMIT
 }
 
+# 預編譯正則表達式
 disk_info_pattern = re.compile(r'(\d+)\s+(\d+)')
 
-async def test_server_disk_c_storage(last_checked, server, db_pool):
+@asynccontextmanager
+async def get_db_pool():
+    """建立和管理資料庫連接池的上下文管理器"""
+    pool = await aiomysql.create_pool(**db_config)
     try:
-        # SSH连接到Windows服务器
-        async with asyncssh.connect(server['host'],
-                                    username=USERNAME,
-                                    password=PASSWORD,
-                                    known_hosts=None,
-                                    connect_timeout=1.5) as conn:
-            # 执行wmic命令来获取C盘的磁盘空间信息
-            result = await conn.run('wmic LogicalDisk where DeviceID="C:" get Size,FreeSpace', check=True)
-            total_capacity, remaining_capacity = parse_disk_info(result.stdout)
+        yield pool
+    finally:
+        pool.close()
+        await pool.wait_closed()
+
+async def test_server_connectivity_and_disk(last_checked, server, db_pool):
+    """測試服務器連接性和磁盤空間"""
+    server_id = server['server_id']
+    is_connectable = False
+    total_capacity_gb, remaining_capacity_gb = None, None
+    
+    try:
+        # 嘗試通過SSH連接服務器
+        async with asyncssh.connect(
+            server['host'],
+            username=USERNAME,
+            password=PASSWORD,
+            known_hosts=None,
+            connect_timeout=1.5
+        ) as conn:
+            is_connectable = True
+            
+            # 既然已經連接成功，檢查磁盤信息
+            try:
+                # 執行wmic命令來獲取C盤的磁盤空間信息
+                result = await conn.run('wmic LogicalDisk where DeviceID="C:" get Size,FreeSpace', check=True)
+                total_capacity_gb, remaining_capacity_gb = parse_disk_info(result.stdout)
+            except Exception as e:
+                print(f'Disk check failed for {server["host"]}: {str(e)}')
     except (OSError, asyncssh.Error) as e:
-        print(f'Disk check failed for {server["host"]}: {str(e)}')
-        total_capacity, remaining_capacity = None, None
-    if total_capacity and remaining_capacity:
-        server_id = server['server_id']
-        # 更新数据库中的磁盘信息
-        async with db_pool.acquire() as conn:
-            async with conn.cursor() as cursor:
+        print(f'Connection failed to {server["host"]}: {str(e)}')
+        is_connectable = False
+    
+    # 批量更新資料庫 - 使用事務減少開銷
+    async with db_pool.acquire() as conn:
+        async with conn.cursor() as cursor:
+            # 更新連接性信息
+            await cursor.execute("""
+                INSERT INTO server_connectivity (server_id, is_connectable, last_checked)
+                VALUES (%s, %s, %s) AS new
+                ON DUPLICATE KEY UPDATE
+                is_connectable = new.is_connectable,
+                last_checked = new.last_checked
+            """, (server_id, is_connectable, last_checked))
+            
+            # 如果有磁盤信息，更新磁盤信息
+            if total_capacity_gb and remaining_capacity_gb:
                 await cursor.execute("""
                     INSERT INTO server_disk_C_storage (server_id, total_capacity_gb, remaining_capacity_gb, last_checked)
                     VALUES (%s, %s, %s, %s) AS new
@@ -46,74 +81,43 @@ async def test_server_disk_c_storage(last_checked, server, db_pool):
                     total_capacity_gb = new.total_capacity_gb,
                     remaining_capacity_gb = new.remaining_capacity_gb,
                     last_checked = new.last_checked
-                """, (server_id, total_capacity, remaining_capacity, last_checked))
-                await conn.commit()
-
-
-async def test_server_connectivity_and_disk(last_checked, server, db_pool):
-    is_connectable = False
-    try:
-        # 尝试通过SSH连接服务器
-        async with asyncssh.connect(server['host'],
-                                    username=USERNAME,
-                                    password=PASSWORD,
-                                    known_hosts=None,connect_timeout=1.5) as conn:
-            is_connectable = True
-            # 既然已经连接成功，我们现在可以检查磁盘信息
-            await test_server_disk_c_storage(last_checked, server, db_pool)
-    except (OSError, asyncssh.Error) as e:
-        print(f'Connection failed to {server["host"]}: {str(e)}')
-        is_connectable = False
-    
-
-    server_id = server['server_id']
-        
-        # 更新数据库中的连接性信息
-    async with db_pool.acquire() as conn:
-        async with conn.cursor() as cursor:
-            await cursor.execute("""
-                    INSERT INTO server_connectivity (server_id, is_connectable, last_checked)
-                    VALUES (%s, %s, %s) AS new
-                    ON DUPLICATE KEY UPDATE
-                    is_connectable = new.is_connectable,
-                    last_checked = new.last_checked
-                """, (server_id, is_connectable, last_checked))
+                """, (server_id, total_capacity_gb, remaining_capacity_gb, last_checked))
+            
+            # 只執行一次提交，減少資料庫交互
             await conn.commit()
             
-            
 def parse_disk_info(disk_output):
-    # 使用预编译的正则表达式匹配数字
+    """解析磁盤信息輸出"""
     match = disk_info_pattern.search(disk_output.strip())
     if match:
-        # 提取剩余空间和总大小
+        # 提取剩余空間和總大小
         remaining_capacity_bytes = int(match.group(1))
         total_capacity_bytes = int(match.group(2))
-        # 转换为GB
-        total_capacity_gb = round(total_capacity_bytes / (1024**3),2)
-        remaining_capacity_gb = round(remaining_capacity_bytes / (1024**3),2)
+        # 轉換為GB，保留兩位小數
+        total_capacity_gb = round(total_capacity_bytes / (1024**3), 2)
+        remaining_capacity_gb = round(remaining_capacity_bytes / (1024**3), 2)
         return total_capacity_gb, remaining_capacity_gb
     else:
         return None, None
 
-
-
 async def main():
-    # 数据库连接池
-    db_pool = await aiomysql.create_pool(**db_config)
-
-    async with db_pool.acquire() as conn:
-        async with conn.cursor(aiomysql.DictCursor) as cursor:
-            # 获取服务器列表
-            await cursor.execute("SELECT server_id, host FROM servers")
-            servers = await cursor.fetchall()
-
+    """主程序入口"""
     last_checked = datetime.now()
-    # 测试所有服务器的连接性并检查磁盘
-    tasks = [test_server_connectivity_and_disk(last_checked, server, db_pool) for server in servers]
-    await asyncio.gather(*tasks)
-
-    db_pool.close()
-    await db_pool.wait_closed()
+    
+    # 使用上下文管理器管理資料庫連接池
+    async with get_db_pool() as db_pool:
+        async with db_pool.acquire() as conn:
+            async with conn.cursor(aiomysql.DictCursor) as cursor:
+                # 獲取服務器列表
+                await cursor.execute("SELECT server_id, host FROM servers")
+                servers = await cursor.fetchall()
+        
+        # 測試所有服務器的連接性和磁盤
+        tasks = [test_server_connectivity_and_disk(last_checked, server, db_pool) for server in servers]
+        await asyncio.gather(*tasks)
 
 if __name__ == '__main__':
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except Exception as e:
+        print(f"An error occurred: {e}")
