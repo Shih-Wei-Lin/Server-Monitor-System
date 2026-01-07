@@ -1,5 +1,18 @@
+import os
+import sys
+
 import pymysql
 
+# Get the directory where the current script is located
+current_dir = os.path.dirname(os.path.abspath(__file__))
+# print(f"Current Directory: {current_dir}")
+
+# Get the path of the parent directory, which should be the "ServerMonitor" directory
+parent_dir = os.path.dirname(current_dir)
+# print(f"Parent Directory: {parent_dir}")
+root_dir = os.path.dirname(parent_dir)
+# print(f"Root Directory: {root_dir}")
+sys.path.append(root_dir)
 from lib.db_config import DefaultConfig
 
 db_config = {

@@ -1,4 +1,5 @@
 import os
+import textwrap
 
 import streamlit as st
 from plotly import graph_objs as go
@@ -14,9 +15,12 @@ def get_status_color(is_connectable):
 
 
 def inject_custom_css():
-    css_path = os.path.join(os.path.dirname(__file__), "custom.css")
-    with open(css_path, "r", encoding="utf-8") as f:  # 指定文件编码为utf-8
-        st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
+    try:
+        css_path = os.path.join(os.path.dirname(__file__), "custom.css")
+        with open(css_path, "r", encoding="utf-8") as f:  # 指定文件编码为utf-8
+            st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
+    except Exception as e:
+        st.warning(f"CSS 載入失敗：{e}")
 
 
 def get_progress_bar_color(percentage):
@@ -33,34 +37,35 @@ def get_progress_bar_color(percentage):
 
 
 def create_progress_bar_disk(usage_percentage, label, used_gb, total_gb):
-    # 根据百分比选择颜色
     color = get_progress_bar_color(usage_percentage)
-    # 使用自定义样式的HTML来创建长方形进度条，文字加粗，并显示已用容量和总容量
     progress_bar_html = f"""
-    <div style='display: flex; align-items: center; margin-top: 0.3em;'>
-        <span style='margin-right: 0.7em; white-space: nowrap;'>{label}</span>
-        <div style="background-color: #d0d3d8; border-radius: 0; position: relative; height: 1.5em; width: 100%;">
-            <div style="background-color: {color}; width: {usage_percentage}%; height: 100%; border-radius: 0;"></div>
-            <div style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: flex; justify-content: center; align-items: center; color: black; font-weight: bold; font-size: 1em;">
+    <div class='progress-bar-container'>
+        <span class='progress-bar-label'>{label}</span>
+        <div class='progress-bar-wrapper'>
+            <div class='progress-bar-inner' style="background-color: {color}; width: {usage_percentage}%;"></div>
+            <div class='progress-bar-text'>
                 {used_gb:.2f} / {total_gb:.2f}GB
             </div>
         </div>
     </div>
     """
-    return progress_bar_html
+    return textwrap.dedent(progress_bar_html).strip()
 
 
-def create_progress_bar(percentage):
-    # 根据百分比选择颜色
+def create_progress_bar(percentage, label):
     color = get_progress_bar_color(percentage)
-    # 使用自定义样式的HTML来创建长方形进度条，文字加粗
+    margin_map = {"CPU": "1.5em", "MEM": "1.25em"}
+    margin = margin_map.get(label, "1.5em")
     progress_bar_style = f"""
-    <div style="background-color: #d0d3d8; border-radius: 0; position: relative; height: 1.5em; width: 100%;">
-        <div style="background-color: {color}; width: {percentage}%; height: 100%; border-radius: 0;"></div>
-        <div style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: flex; justify-content: center; align-items: center; color: black; font-weight: bold; font-size: 1em;">{percentage}%</div>
+    <div class="progress-bar-container">
+        <span style="margin-right: {margin};">{label}</span>
+        <div class="progress-bar-wrapper">
+            <div class="progress-bar-inner" style="background-color: {color}; width: {percentage}%;"></div>
+            <div class="progress-bar-text">{percentage}%</div>
+        </div>
     </div>
     """
-    return progress_bar_style
+    return textwrap.dedent(progress_bar_style).strip()
 
 
 def create_chart(df_recent):
@@ -107,37 +112,22 @@ def create_chart(df_recent):
         xref="paper",  # 相对于图表的宽度
         yref="y",  # 相对于Y轴
     )
-    st.plotly_chart(fig, use_container_width=False)
+    st.plotly_chart(fig, width="content")
 
 
 def create_open_new_page_button(button_text, url):
-    # 使用 HTML 和 CSS 來模仿 Streamlit 按鈕的樣式，并使文字居中
     html_code = f"""
-    <style>
-        .custom-button {{
-            background-color: transparent;
-            padding: 0.5em 6em;
-            border-radius: 0.25em;
-            cursor: pointer;
-            font-size: 1em;
-            display: inline-block;
-            text-align: center;
-            text-decoration: none;
-            margin: 0 0 0.5em 0;  /* 添加下边距 */
-        }}
-        .custom-button:link, .custom-button:visited {{
-            color: #2894FF;
-            text-decoration: none; /* 移除下划线 */
-        }}
-        .custom-button:hover {{
-            background-color: #22232a;
-            color: #dd574b; /* 滑鼠移過去時文字改為紅色 */
-        }}
-        .button-container {{
-            display: flex;
-            justify-content: center;
-        }}
-    </style>
+    <div class="button-container">
+        <a href="{url}" target="_blank" class="custom-button">
+            {button_text}
+        </a>
+    </div>
+    """
+    return html_code
+
+
+def create_link_button(button_text, url):
+    html_code = f"""
     <div class="button-container">
         <a href="{url}" target="_blank" class="custom-button">
             {button_text}

@@ -154,14 +154,30 @@ async def update_database(
                 )
             # 插入活跃ip
             for ip in active_ip:
-                await cur.execute(
-                    """INSERT INTO active_ip (server_id, ip_address, timestamp) VALUES (%s, %s, %s) AS new
-                                  ON Duplicate Key update
-                                  ip_address = new.ip_address,
-                                  timestamp = new.timestamp
-                                  """,
-                    (server_id, ip, current_time),
-                )
+                try:
+                    # 檢查 IP 是否存在於 user_ip_map
+                    await cur.execute(
+                        "SELECT 1 FROM user_ip_map WHERE ip_address = %s", (ip,)
+                    )
+                    exists = await cur.fetchone()
+                    if not exists:
+                        print(
+                            f"Error: IP {ip} does not exist in user_ip_map and cannot be inserted into active_ip for server {server_id}"
+                        )
+                        continue  # 跳過此 IP
+
+                    # 插入 active_ip
+                    await cur.execute(
+                        """INSERT INTO active_ip (server_id, ip_address, timestamp)
+                           VALUES (%s, %s, %s)
+                           ON DUPLICATE KEY UPDATE
+                           ip_address = VALUES(ip_address),
+                           timestamp = VALUES(timestamp)
+                        """,
+                        (server_id, ip, current_time),
+                    )
+                except Exception as e:
+                    print(f"插入 IP {ip} 時發生錯誤：{e}")
             # await conn.commit()
 
 

@@ -44,7 +44,7 @@ async def test_server_disk_c_storage(last_checked, server, db_pool):
             username=USERNAME,
             password=PASSWORD,
             known_hosts=None,
-            connect_timeout=1.5,
+            connect_timeout=2,
         ) as conn:
             # 执行wmic命令来获取C盘的磁盘空间信息
             result = await conn.run(

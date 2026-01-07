@@ -1,21 +1,42 @@
+import os
+import sys
 from datetime import timedelta
 
 import pandas as pd
 import pymysql
 import streamlit as st
-from db_utils import (get_active_user_names, get_active_users,
-                      get_database_connection, get_disk_c_usage,
-                      get_latest_average_timestamp, get_latest_timestamp,
-                      query_latest_check_time,
-                      query_latest_server_connectivity,
-                      query_recent_server_data, query_server_usage)
 from plotly import graph_objs as go
 from streamlit_autorefresh import st_autorefresh
-from utils import (create_chart, create_open_new_page_button,
-                   create_progress_bar, create_progress_bar_disk,
-                   get_status_color, inject_custom_css)
-from version_updates import display_version_updates, updates_data
 
+# Get the directory where the current script is located
+current_dir = os.path.dirname(os.path.abspath(__file__))
+# print(f"Current Directory: {current_dir}")
+
+# Get the path of the parent directory, which should be the "ServerMonitor" directory
+parent_dir = os.path.dirname(current_dir)
+# print(f"Parent Directory: {parent_dir}")
+root_dir = os.path.dirname(parent_dir)
+# print(f"Root Directory: {root_dir}")
+sys.path.append(root_dir)
+from lib.db_config import DefaultConfig
+from lib.UI.tool.db_utils import (get_active_users_and_names,
+                                  get_database_connection, get_disk_c_usage,
+                                  get_latest_average_timestamp,
+                                  get_latest_timestamp, get_server_ids,
+                                  get_server_metrics_averages,
+                                  query_latest_check_time,
+                                  query_latest_server_connectivity,
+                                  query_recent_server_data, query_server_usage)
+from lib.UI.tool.utils import (create_chart, create_open_new_page_button,
+                               create_progress_bar, create_progress_bar_disk,
+                               get_status_color, inject_custom_css)
+from lib.UI.tool.version_updates import display_version_updates, updates_data
+
+library_ip = DefaultConfig.LIBRARY_IP
+git_ip = DefaultConfig.GIT_IP
+filestation_ip = DefaultConfig.FILE_STATION_PAGE
+bulletin_ip = DefaultConfig.BULLETIN_BOARD
+via_wizard_ip = DefaultConfig.VIA_WIZARD
 # need version_updates.py utils.py db_utils.py
 
 # 设置页面居中
@@ -71,7 +92,6 @@ def display_latest_server_connectivity(connection, latest_check_time):
                     subset=["status"],
                 )
             )
-            # 使用 Streamlit 的 dataframe 函数显示表格，并设置高度
 
         else:
             st.write("沒有可用的伺服器連接數據。")
@@ -143,12 +163,6 @@ def display_server_usage(connection, usage_data, latest_timestamp):
         st.error(f"Error querying the database: {e}")
 
 
-def get_active_users_and_names(connection, server_id, latest_timestamp):
-    active_users = get_active_users(connection, server_id, latest_timestamp)
-    active_usernames = get_active_user_names(connection, server_id, latest_timestamp)
-    return active_users, active_usernames
-
-
 def get_disk_c_usage_percentage(connection, server_id):
     disk_c_data = get_disk_c_usage(connection, server_id)
     if disk_c_data:
@@ -200,58 +214,61 @@ def show_expanded_info(connection, server_id, active_users, active_usernames):
         st.error(f"Error querying the database: {e}")
 
 
+def generate_lights_html(num_active_users, max_lights=4):
+    light_colors = ["#28a745", "#ffc107", "#fd7e14", "#dc3545"]
+    lights = []
+    for i in range(max_lights):
+        light_color = (
+            light_colors[min(num_active_users, max_lights) - 1]
+            if i < num_active_users
+            else "#6c757d"
+        )
+        lights.append(
+            f"<div style='width: 0.6em; height: 0.6em; border-radius: 50%; margin-right: 0.3em; background-color: {light_color}; transform: translateY(-0.5em);'></div>"
+        )
+    return "".join(lights)
+
+
 def show_server_data(connection, row, latest_timestamp):
     server_id = int(row["Server ID"])
     active_users, active_usernames = get_active_users_and_names(
         connection, server_id, latest_timestamp
     )
     num_active_users = len(active_users) if active_users else 0
+
     # 获取磁盘 C 的使用率
     disk_c_usage_percentage, total_capacity_gb, used_capacity_gb = (
         get_disk_c_usage_percentage(connection, server_id)
     )
-    # 生成灯号的HTML
-    light_colors = ["#28a745", "#ffc107", "#fd7e14", "#dc3545"]
-    lights = []
-    for i in range(4):
-        light_color = (
-            light_colors[min(num_active_users, 4) - 1]
-            if i < num_active_users
-            else "#6c757d"
-        )
-        lights.append(
-            f"<div style='width: 10px; height: 10px; border-radius: 50%; margin-right: 5px; background-color: {light_color};'></div>"
-        )
+
+    # 生成指示灯的HTML
+    lights_html = generate_lights_html(num_active_users)
 
     st.markdown(
-        # 创建一个容器，其中包含指示灯和服务器 ID，确保它们垂直居中对齐
         f"<div style='display: flex; justify-content: flex-start; align-items: center;'>"
-        # 指示灯部分
-        f"<div style='display: flex; flex-direction: row; min-height: 22px; margin-right: 10px;'>"
-        + "".join(lights)
-        + f"</div>"
-        # 服务器 ID 部分
+        f"<div style='display: flex; align-items: center; margin-right: 0.6em;'>"
+        f"{lights_html}"
+        f"</div>"
         f"<div style='display: flex; align-items: center;'>"
-        f"<h5 style='font-weight: bold; margin: 0; padding-left: 10px;'>{server_id}</h5>"
+        f"<h5 style='font-weight: bold; margin: 0;'>{server_id}</h5>"
         f"</div>"
         f"</div>"
-        # 显示 CPU 使用率进度条
-        f"<div style='display: flex; align-items: center; margin-top: 5px;'>"
-        "<span style='margin-right: 24px;'>CPU</span>"
+        f"<div style='display: flex; align-items: center; margin-top: 0.3em;'>"
+        "<span style='margin-right: 1.5em;'>CPU</span>"
         f"{create_progress_bar(row['CPU Usage (%)'])}</div>"
-        # 显示内存使用率进度条
-        f"<div style='display: flex; align-items: center; margin-top: 5px;'>"
-        "<span style='margin-right: 20px;'>MEM</span>"
+        f"<div style='display: flex; align-items: center; margin-top: 0.3em;'>"
+        "<span style='margin-right: 1.25em;'>MEM</span>"
         f"{create_progress_bar(row['Memory Usage (%)'])}</div>",
         unsafe_allow_html=True,
     )
+
     disk_progress = create_progress_bar_disk(
         disk_c_usage_percentage, "Disk C", used_capacity_gb, total_capacity_gb
     )
     st.markdown(f"{disk_progress}", unsafe_allow_html=True)
     st.markdown(
-        "<div style='margin-top: 10px;'></div>", unsafe_allow_html=True
-    )  # 添加10像素的上边距
+        "<div style='margin-top: 0.6em;'></div>", unsafe_allow_html=True
+    )  # 添加0.6em的上边距
     st.markdown(
         """
         <style>
@@ -262,35 +279,6 @@ def show_server_data(connection, row, latest_timestamp):
     )
     with st.expander(f" {server_id} more info", expanded=False):
         show_expanded_info(connection, server_id, active_users, active_usernames)
-
-
-def get_server_ids(connection):
-    try:
-        with connection.cursor() as cursor:
-            query = "SELECT server_id FROM servers;"
-            cursor.execute(query)
-            server_ids = cursor.fetchall()
-            return [server["server_id"] for server in server_ids]
-    except Exception as e:
-        st.error(f"Error fetching server IDs: {e}")
-        return []
-
-
-# 查询数据库中的平均使用率数据
-def get_server_metrics_averages(connection, server_id, start_date, end_date):
-    try:
-        with connection.cursor() as cursor:
-            query = """
-            SELECT *
-            FROM server_metrics_averages
-            WHERE server_id = %s AND average_timestamp BETWEEN %s AND %s;
-            """
-            cursor.execute(query, (server_id, start_date, end_date))
-            result = cursor.fetchall()
-            return result
-    except Exception as e:
-        st.error(f"Error fetching server metrics averages: {e}")
-        return []
 
 
 def show_statistics(connection, server_ids, latest_average_time):
@@ -372,9 +360,9 @@ def show_statistics(connection, server_ids, latest_average_time):
 
         col_plot1, col_plot2 = st.columns(2)
         with col_plot1:
-            st.plotly_chart(fig_CPU, use_container_width=True)
+            st.plotly_chart(fig_CPU, width="stretch")
         with col_plot2:
-            st.plotly_chart(fig_MEM, use_container_width=True)
+            st.plotly_chart(fig_MEM, width="stretch")
     else:
         st.write("Please select a date range and at least one metric to display.")
 
@@ -418,83 +406,108 @@ def show_server_monitor_system():
 
 
 def calculate_wavelength_frequency(
-    frequency, frequency_unit, wavelength, wavelength_unit, use_scientific_notation
+    frequency, frequency_unit, wavelength, wavelength_unit
 ):
     c = 299792458  # 光速 (m/s)
     unit_conversion = {"nm": 1e-9, "μm": 1e-6, "mm": 1e-3, "cm": 1e-2, "m": 1}
     unit_factors = {"Hz": 1, "kHz": 1e3, "MHz": 1e6, "GHz": 1e9, "THz": 1e12}
-    frequency_hz = frequency * unit_factors[frequency_unit]
-    wavelength_m = wavelength * unit_conversion[wavelength_unit]
-    calculated_wavelength = c / frequency_hz
-    calculated_frequency = c / wavelength_m
-    col1, col3 = st.columns(2)
-    with col1:
-        if use_scientific_notation:
-            st.write(f"對應的波長: {calculated_wavelength:.4e} {wavelength_unit}")
-        else:
-            st.write(f"對應的波長: {calculated_wavelength:.4f} {wavelength_unit}")
-    with col3:
-        if use_scientific_notation:
-            st.write(f"對應的頻率: {calculated_frequency / 1e9:.4e} {frequency_unit}")
-        else:
-            st.write(f"對應的頻率: {calculated_frequency / 1e9:.4f} {frequency_unit}")
+
+    # 將輸入的頻率和波長轉換為基礎單位
+    calculated_wavelength = None
+    calculated_frequency = None
+
+    if frequency is not None:
+        frequency_hz = frequency * unit_factors[frequency_unit]
+        calculated_wavelength_m = c / frequency_hz
+        calculated_wavelength = (
+            calculated_wavelength_m / unit_conversion[wavelength_unit]
+        )
+
+    if wavelength is not None:
+        wavelength_m = wavelength * unit_conversion[wavelength_unit]
+        calculated_frequency_hz = c / wavelength_m
+        calculated_frequency = calculated_frequency_hz / unit_factors[frequency_unit]
+
+    return calculated_wavelength, calculated_frequency
 
 
 def show_calculator():
-    tab1, tab2, tab3, tab4 = st.tabs(["General", "test", "test", "test"])
-    with tab1:
-        st.title("波長頻率換算器")
-        # 創建兩列佈局
-        col1, col2 = st.columns(2)
-        with col1:
-            # 使用科學記號
-            use_scientific_notation = st.checkbox("使用科學記號", value=False)
-            # 創建更多的列來佈局輸入框
-            col3, col4, col5, col6 = st.columns(4)
-            with col3:
-                # 頻率輸入
-                frequency = st.number_input(
-                    "頻率 (f)", min_value=0.0, value=0.9993, key="frequency"
-                )
-            with col4:
-                frequency_unit = st.selectbox(
-                    "選擇頻率單位",
-                    ["Hz", "kHz", "MHz", "GHz", "THz"],
-                    index=3,
-                    key="frequency_unit",
-                )
-            with col5:
-                # 波長輸入
-                wavelength = st.number_input(
-                    "波長 (λ)", min_value=0.0, value=300.0, key="wavelength"
-                )
-            with col6:
-                wavelength_unit = st.selectbox(
-                    "選擇波長單位",
-                    ["nm", "μm", "mm", "cm", "m"],
-                    index=4,
-                    key="wavelength_unit",
-                )
-            # 計算
-            calculate_wavelength_frequency(
-                frequency,
-                frequency_unit,
-                wavelength,
-                wavelength_unit,
-                use_scientific_notation,
+    if "switch" not in st.session_state:
+        st.session_state.switch = False
+
+    def switch_input():
+        st.session_state.switch = not st.session_state.switch
+
+    st.title("波長頻率換算器")
+    st.button("顛倒轉換", on_click=switch_input)
+
+    col1, col2 = st.columns(2)
+    with col1:
+        use_scientific_notation = st.checkbox("使用科學記號", value=False)
+
+        col3, col4 = st.columns(2)
+        with col3:
+            # 單位選擇框
+            frequency_unit = st.selectbox(
+                "選擇頻率單位",
+                ["Hz", "kHz", "MHz", "GHz", "THz"],
+                index=3,
+                key="frequency_unit_display",
             )
-        with col2:
-            st.write("### 公式")
-            col9, col10 = st.columns(2)
-            with col9:
-                # 顯示公式
-                st.write("λ = c / f")
-                st.write("c = λ * f")
-                st.write("f = c / λ")
-            with col10:
-                st.write("c = 光速 (299,792,458 m/s)")
-                st.write("f = 頻率 (Hz)")
-                st.write("λ (λ) = 波長 (m)")
+
+            if st.session_state.switch:
+                frequency = st.number_input(
+                    "頻率 (f)", min_value=0.0, value=1.0, step=0.1, key="frequency"
+                )
+                wavelength = None
+            else:
+                wavelength = st.number_input(
+                    "波長 (λ)", min_value=0.0, value=300.0, step=0.1, key="wavelength"
+                )
+                frequency = None
+
+        with col4:
+            # 計算波長和頻率
+            wavelength_unit = st.selectbox(
+                "選擇波長單位",
+                ["nm", "μm", "mm", "cm", "m"],
+                index=4,
+                key="wavelength_unit_display",
+            )
+            calculated_wavelength, calculated_frequency = (
+                calculate_wavelength_frequency(
+                    frequency, frequency_unit, wavelength, wavelength_unit
+                )
+            )
+
+            # 顯示結果
+            if calculated_wavelength is not None:
+                if use_scientific_notation:
+                    st.write(f"對應的波長:")
+                    st.write(f"{calculated_wavelength:.4e} {wavelength_unit}")
+                else:
+                    st.write(f"對應的波長: ")
+                    st.write(f"{calculated_wavelength:.4f} {wavelength_unit}")
+
+            if calculated_frequency is not None:
+                if use_scientific_notation:
+                    st.write(f"對應的頻率: ")
+                    st.write(f"{calculated_frequency:.4e} {frequency_unit}")
+                else:
+                    st.write(f"對應的頻率:")
+                    st.write(f"{calculated_frequency:.4f} {frequency_unit}")
+
+    with col2:
+        st.write("### 公式")
+        col9, col10 = st.columns(2)
+        with col9:
+            st.latex(r"\lambda = \frac{c}{f}")
+            st.latex(r"c = \lambda \cdot f")
+            st.latex(r"f = \frac{c}{\lambda}")
+        with col10:
+            st.write("c = 光速 (299,792,458 m/s)")
+            st.write("f = 頻率 (Hz)")
+            st.write("λ = 波長 (m)")
 
 
 # 主函数
@@ -509,25 +522,39 @@ def main():
 
     # 侧边栏
     st.sidebar.title("ASUS SIPI")
-    # 添加一個新的按鈕，點擊後在新分頁中打開連結
 
     # 侧边栏全宽度无外框按钮用来导航
+    st.sidebar.markdown(
+        create_open_new_page_button("公告欄 ", bulletin_ip), unsafe_allow_html=True
+    )
     if st.sidebar.button("Server Monitor System", key="server_monitor_button"):
         navigate_to("Server Monitor System")
+    if st.sidebar.button("Useful Calculator", key="calculator_button"):
+        navigate_to("Calculator")
 
-    # if st.sidebar.button("test page ", key="calculator_button"):
-    #     navigate_to('Calculator')
-
-    st.sidebar.markdown(
-        create_open_new_page_button("SIPI Library"), unsafe_allow_html=True
-    )
-
-    # 根据session_state中的current_page展示不同的页面
     if st.session_state.current_page == "Calculator":
         show_calculator()
     elif st.session_state.current_page == "Server Monitor System":
         st_autorefresh(interval=20000, key="server_monitor_autorefresh")
         show_server_monitor_system()
+    # 在侧边栏中添加按钮
+
+    # 添加一個新的按鈕，點擊後在新分頁中打開連結
+    st.sidebar.markdown(
+        create_open_new_page_button("ASUS KM", library_ip), unsafe_allow_html=True
+    )
+
+    st.sidebar.markdown(
+        create_open_new_page_button("Git", git_ip), unsafe_allow_html=True
+    )
+
+    st.sidebar.markdown(
+        create_open_new_page_button("file station", filestation_ip),
+        unsafe_allow_html=True,
+    )
+    st.sidebar.markdown(
+        create_open_new_page_button("Via Wizard", via_wizard_ip), unsafe_allow_html=True
+    )
 
 
 if __name__ == "__main__":

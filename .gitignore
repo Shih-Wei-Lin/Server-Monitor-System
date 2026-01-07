@@ -1,0 +1,8 @@
+*.pyc
+install/
+/for_test/
+*.log
+# db_config.py
+
+# File to store server booking state
+# booking_state.json

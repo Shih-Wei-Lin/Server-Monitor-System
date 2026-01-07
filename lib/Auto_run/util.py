@@ -5,7 +5,7 @@ import signal
 import subprocess
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional, Union
 
@@ -63,7 +63,6 @@ def periodical_execution(
             for epoch in range(count):
                 logger.info(f"Epoch: {epoch}")
                 execution_time = executioner(command)
-
                 # No need to sleep after the last execution
                 if epoch < count - 1:
                     sleep_time = max(0, nap_time - execution_time)
@@ -129,9 +128,6 @@ def continuous_execution(
             logger.error("Execution time cannot be zero")
             return
 
-        # Set up signal handler
-        signal.signal(signal.SIGINT, terminate_execution)
-
         # Calculate execution intervals
         nap_check = min_check * 60 + sec_check
         nap_extract = min_extract * 60 + sec_extract
@@ -176,9 +172,71 @@ def continuous_execution(
             # Sleep until the next data extraction
             if sleep_time > 0:
                 time.sleep(sleep_time)
-
     except Exception as e:
         logger.exception(f"An error occurred during execution: {e}")
+
+
+def daily_execution(
+    file_path: str, hour: int = 24, minute: int = 0, second: int = 0
+) -> None:
+    """
+    Execute the specified Python file once every day at a given time.
+    Args:
+        file_path: Path to the Python file to be executed
+        hour: Hour of the day for execution (default: 24)
+        minute: Minute of the hour for execution (default: 0)
+        second: Second of the minute for execution (default: 0)
+    """
+    try:
+        # Check if the file exists
+        file_obj = Path(file_path)
+        if not file_obj.is_file():
+            logger.error(f"File not found: {file_path}")
+            return
+
+        # Validate parameters
+        for param_name, param_value in {
+            "hour": hour,
+            "minute": minute,
+            "second": second,
+        }.items():
+            if isinstance(param_value, int):
+                if param_value < 0:
+                    logger.error(f"{param_name} must be a non-negative integer")
+                    return
+            else:
+                logger.error(f"{param_name} must be an integer")
+                return
+
+        # Calculate the next execution time
+        now = datetime.now()
+        next_execution_time = datetime(
+            now.year, now.month, now.day, hour, minute, second
+        )
+
+        if next_execution_time < now:
+            next_execution_time += timedelta(days=1)
+
+        logger.info(f"Next daily execution scheduled for: {next_execution_time}")
+
+        # Main loop
+        while True:
+            # Calculate time until the next execution
+            sleep_until_next = (next_execution_time - datetime.now()).total_seconds()
+            if sleep_until_next > 0:
+                logger.info(
+                    f"Sleeping until next daily execution in {sleep_until_next / 3600:.2f} hours"
+                )
+                time.sleep(sleep_until_next)
+
+            # Execute the file
+            command = f"python {file_path}"
+            executioner(command, evaluate_time=False)
+
+            # Calculate the next execution time for the following day
+            next_execution_time += timedelta(days=1)
+    except Exception as e:
+        logger.exception(f"An error occurred during daily execution: {e}")
 
 
 def executioner(command: str, evaluate_time: bool = True) -> Optional[float]:
@@ -199,6 +257,7 @@ def executioner(command: str, evaluate_time: bool = True) -> Optional[float]:
 
     end = time.time()
     execution_time = end - start
+
     if result.returncode != 0:
         logger.warning(f"Command execution failed with exit code: {result.returncode}")
         logger.error(f"Standard error output: {result.stderr}")
@@ -209,15 +268,5 @@ def executioner(command: str, evaluate_time: bool = True) -> Optional[float]:
 
     if evaluate_time:
         return execution_time
+
     return None
-
-
-def terminate_execution(sig_num, frame):
-    """
-    Handle the termination signal.
-    Args:
-        sig_num: Signal number
-        frame: Current stack frame
-    """
-    logger.info(f"Received signal {sig_num}, terminating execution")
-    sys.exit(0)

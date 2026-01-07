@@ -1,0 +1,17 @@
+matplotlib
+ipykernel
+debugpy
+streamlit
+black
+isort 
+flake8 
+codespell
+jupyter
+spyder
+pymysql
+plotly
+streamlit_autorefresh
+asyncio
+asyncssh
+aiomysql
+pandas
