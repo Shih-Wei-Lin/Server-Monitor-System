@@ -1,11 +1,11 @@
-/* 添加创建者信息的样式 */
+/* Footer credit styles */
 .credit {
     position: fixed;
     bottom: 10px;
     right: 10px;
     color: grey;
     font-size: 0.8em;
-    z-index:9999;
+    z-index: 9999;
 }
 
 .main-title {
@@ -19,23 +19,23 @@
     vertical-align: baseline;
 }
 
-/* --- Server Card --- */
+/* Server Card */
 .server-card {
-    border: 1px solid #808080; /* Default: Grey for available/offline */
+    border: 1px solid #808080;
     border-radius: 10px;
     padding: 15px;
     margin-bottom: 10px;
-    min-height: 250px; /* Use min-height for flexibility */
+    min-height: 250px;
     display: flex;
     flex-direction: column;
 }
 
 .server-card.status-booked {
-    border-color: #ff4b4b; /* Red */
+    border-color: #ff4b4b;
 }
 
 .server-card.status-online {
-    border-color: #28a745; /* Green */
+    border-color: #28a745;
 }
 
 .server-card .card-header h5 {
@@ -55,7 +55,7 @@
     color: red;
 }
 
-/* --- Booked Badge --- */
+/* Booked Badge */
 .booked-by-badge {
     font-size: 0.8em;
     color: #ff4b4b;
@@ -65,7 +65,7 @@
     margin-left: 10px;
 }
 
-/* --- Progress Bar --- */
+/* Progress Bar */
 .progress-bar-container {
     display: flex;
     align-items: center;
@@ -104,7 +104,7 @@
     font-size: 1em;
 }
 
-/* --- Custom Button from utils.py --- */
+/* Custom Button */
 .custom-button {
     background-color: transparent;
     padding: 0.5em 6em;

@@ -1,20 +1,60 @@
-# 目的
-- 透過SSH 抓取所有server CPU、MEM、Disk C的使用資源\
-- 將抓取到的資源儲存在Mysql的資料庫裏面
-- 透過抓取Mysql資料庫的資料後使用streamlit 建構網站
+# Server Monitor System
 
-# 瀏覽器相容性建議（如遇顯示問題）
-若瀏覽器出現以下狀況：
+Collects server resource usage over SSH, stores metrics in MySQL, and presents dashboards in Streamlit.
 
-相關版本發布 [v1.0.0](http://192.168.1.81:3000/Server_Monitor/Server_Monitor_system/releases/tag/v1.0.0) 及問題 http://192.168.1.81:3000/Server_Monitor/Server_Monitor_system/issues/4
+## Requirements
 
-- 網頁無法顯示圖表
-- 按鈕失靈或佈局錯亂
-- 頁面卡住或白屏
-## 請先嘗試安裝或更新以下瀏覽器：
+- Python 3.10+
+- MySQL
+- OpenSSH access to target servers
 
-👉 [Google Chrome](http://192.168.1.81:3000/Server_Monitor/Server_Monitor_system/releases/download/v1.0.0/ChromeStandaloneSetup64.exe)
+## Setup
 
-👉 [Microsoft Edge](http://192.168.1.81:3000/Server_Monitor/Server_Monitor_system/releases/download/v1.0.0/MicrosoftEdgeEnterpriseX64.msi)
+1. Install dependencies:
 
-🔔 建議使用最新版本的 Chrome 或 Edge，因為 Streamlit 前端元件（如 Plotly、Altair）對舊版瀏覽器支援不佳。 
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+2. Configure `lib/config.py` with database credentials, SSH accounts, and URLs.
+
+3. Ensure your MySQL schema matches the expected tables used by the scripts.
+
+## Run
+
+### Streamlit UI
+
+```bash
+streamlit run lib/ui/app.py
+```
+
+### Booking UI
+
+The booking interface is part of the Streamlit app.
+Booking state is stored in `booking_state.json` at the repo root.
+
+### Data Collection Scripts
+
+```bash
+python -m lib.mysql_update.check_connect
+python -m lib.mysql_update.update_status
+python -m lib.mysql_update.compress_data
+```
+
+### Scheduler
+
+```bash
+python -m lib.auto_run.runner
+```
+
+### Backup (optional)
+
+```bash
+python -m lib.mysql_update.backup
+```
+
+## Notes
+
+- `lib/auto_run/runner.py` uses `DefaultConfig.FILE_PATH` to locate scripts.
+  If it is empty, it defaults to `lib/mysql_update` under the repo root.
+- For version display, the UI reads `git describe` when available.

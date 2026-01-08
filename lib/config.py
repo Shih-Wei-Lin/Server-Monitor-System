@@ -1,14 +1,20 @@
-# Config file for account info
+class DefaultConfig:
+    """
+    Central configuration values for the project.
 
+    Parameters:
+        None
+    Returns:
+        None
+    Raises:
+        None
+    """
 
-class DefaultConfig(object):
-    # 添加第一组和第二组预设的用户凭证
     DEFAULT_USERNAME = ""
     DEFAULT_PASSWORD = ""
     SECONDARY_USERNAME = ""
     SECONDARY_PASSWORD = ""
 
-    # for check info
     HOST = "localhost"
     PORT = 3306
     USER = "root"
@@ -17,7 +23,6 @@ class DefaultConfig(object):
     CHARSET = "utf8mb4"
     AUTO_COMMIT = True
 
-    # for website
     HOST_S = "localhost"
     PORT_S = 3306
     USER_S = "root"
@@ -26,11 +31,10 @@ class DefaultConfig(object):
     CHARSET_S = "utf8mb4"
     AUTO_COMMIT_S = True
 
-    # 執行檔案路徑
     FILE_PATH = ""
-    FILE_EXTRACT = "Update_status_V0.2.py"
-    FILE_CHECK_CONNECT = "Check_connect_V0.1.py"
-    FILE_COMPRESS = "Compress_data_10min.py"
+    FILE_EXTRACT = "update_status.py"
+    FILE_CHECK_CONNECT = "check_connect.py"
+    FILE_COMPRESS = "compress_data.py"
 
     LIBRARY_IP = ""
     GIT_IP = ""
@@ -40,18 +44,13 @@ class DefaultConfig(object):
     PI_AUTOMATION = ""
     OPEN_WEBUI = ""
 
-    # UI and App Behavior Settings
     PAGE_TITLE = "Monitor"
     PAGE_ICON = ":desktop_computer:"
-    REFRESH_INTERVAL_MS = 20000  # In milliseconds
-    USER_OFFLINE_THRESHOLD_S = 10  # In seconds
+    REFRESH_INTERVAL_MS = 20000
+    USER_OFFLINE_THRESHOLD_S = 10
 
-    # Booking System Settings
-    BOOKING_DURATION_SECONDS = 8 * 60 * 60  # 8 hours
-    LOCK_TIMEOUT_S = 5  # In seconds for booking state file
+    BOOKING_DURATION_SECONDS = 8 * 60 * 60
+    LOCK_TIMEOUT_S = 5
 
-    # External Links
     HELP_URL = ""
-    BUG_REPORT_URL =""
-
-# Config file for account info
+    BUG_REPORT_URL = ""

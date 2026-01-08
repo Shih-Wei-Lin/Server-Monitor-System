@@ -1,41 +1,31 @@
+"""
+Collect server resource usage over SSH and persist it to MySQL.
+"""
+
+from __future__ import annotations
+
 import asyncio
-import os
 import re
-import sys
 from contextlib import asynccontextmanager
 from datetime import datetime
+from typing import List, Optional, Tuple
 
 import aiomysql
 import asyncssh
 
-# Get the directory where the current script is located
-current_dir = os.path.dirname(os.path.abspath(__file__))
-# print(f"Current Directory: {current_dir}")
+from lib.config import DefaultConfig
 
-# Get the path of the parent directory, which should be the "ServerMonitor" directory
-parent_dir = os.path.dirname(current_dir)
-# print(f"Parent Directory: {parent_dir}")
-root_dir = os.path.dirname(parent_dir)
-# print(f"Root Directory: {root_dir}")
-sys.path.append(root_dir)
-from lib.db_config import DefaultConfig
+MEMORY_PATTERN = re.compile(r"FreePhysicalMemory=(\d+)\s+TotalVisibleMemorySize=(\d+)", re.IGNORECASE)
+CPU_PATTERN = re.compile(r'"(\d+\.\d+)"')
+USER_PATTERN = re.compile(r"(\w+)\s+\S+\s+\d+\s+Active", re.MULTILINE)
+IP_PATTERN = re.compile(r"\s192\.168\.1\.\d+:3389\s+(192\.168\.1\.\d+)", re.MULTILINE)
 
-# 预编译正则表达式
-memory_pattern = re.compile(
-    r"FreePhysicalMemory=(\d+)\s+TotalVisibleMemorySize=(\d+)", re.IGNORECASE
-)
-cpu_pattern = re.compile(r'"(\d+.\d+)"')
-user_pattern = re.compile(r"(\w+)\s+\S+\s+\d+\s+Active", re.MULTILINE)
-disk_pattern = re.compile(r"FreeSpace=(\d+)", re.IGNORECASE)
-ip_pattern = re.compile(r"\s192\.168\.1\.\d+:3389\s+(192\.168\.1\.\d+)", re.MULTILINE)
-
-# 添加第一组和第二组预设的用户凭证
 DEFAULT_USERNAME = DefaultConfig.DEFAULT_USERNAME
 DEFAULT_PASSWORD = DefaultConfig.DEFAULT_PASSWORD
 SECONDARY_USERNAME = DefaultConfig.SECONDARY_USERNAME
 SECONDARY_PASSWORD = DefaultConfig.SECONDARY_PASSWORD
 
-db_config = {
+DB_CONFIG = {
     "host": DefaultConfig.HOST,
     "port": DefaultConfig.PORT,
     "user": DefaultConfig.USER,
@@ -46,13 +36,19 @@ db_config = {
 }
 
 
-def bytes_to_gb(bytes_value):
-    return round(bytes_value / (1024**3), 2)  # 将字节转换为 GB 并保留两位小数
-
-
 @asynccontextmanager
 async def get_db_pool():
-    pool = await aiomysql.create_pool(**db_config)
+    """
+    Create and yield an aiomysql connection pool.
+
+    Parameters:
+        None
+    Returns:
+        aiomysql.Pool: Connection pool context.
+    Raises:
+        Exception: Propagates pool creation errors.
+    """
+    pool = await aiomysql.create_pool(**DB_CONFIG)
     try:
         yield pool
     finally:
@@ -60,15 +56,27 @@ async def get_db_pool():
         await pool.wait_closed()
 
 
-async def get_server_usage(host, connect_timeout=10):
-    # 尝试连接的内部函数
-    async def try_connect(username, password):
+async def get_server_usage(host: str, connect_timeout: int = 10):
+    """
+    Collect CPU, memory, active users, and active IPs for a server.
+
+    Parameters:
+        host (str): Server hostname or IP.
+        connect_timeout (int): SSH connection timeout in seconds.
+    Returns:
+        Tuple[str, object, object, List[str], List[str]]: Host, CPU, memory, users, IPs.
+    Raises:
+        None
+    """
+
+    async def try_connect(username: str, password: str) -> Optional[Tuple[str, object, object, List[str], List[str]]]:
         try:
             async with asyncssh.connect(
                 host,
                 username=username,
                 password=password,
                 connect_timeout=connect_timeout,
+                known_hosts=None,
             ) as conn:
                 command = (
                     "wmic OS get FreePhysicalMemory,TotalVisibleMemorySize /Value & "
@@ -79,8 +87,8 @@ async def get_server_usage(host, connect_timeout=10):
                 )
                 result = await conn.run(command)
                 output = result.stdout
-                # 内存使用率
-                memory_match = memory_pattern.search(output)
+
+                memory_match = MEMORY_PATTERN.search(output)
                 if memory_match is not None:
                     free_memory = int(memory_match.group(1))
                     total_memory = int(memory_match.group(2))
@@ -88,38 +96,56 @@ async def get_server_usage(host, connect_timeout=10):
                 else:
                     memory_usage = "Unknown"
 
-                # CPU 使用率
-                cpu_usage_match = cpu_pattern.search(output)
+                cpu_usage_match = CPU_PATTERN.search(output)
                 if cpu_usage_match is not None:
                     cpu_usage = float(cpu_usage_match.group(1))
                 else:
                     cpu_usage = "Unknown"
 
-                # 活跃用户
-                active_users = user_pattern.findall(output)
-                # 活躍ip
-                active_ip = ip_pattern.findall(output)
+                active_users = USER_PATTERN.findall(output)
+                active_ip = IP_PATTERN.findall(output)
 
-                return (host, cpu_usage, memory_usage, active_users, active_ip)
-        except (asyncssh.Error, asyncio.TimeoutError) as e:
-            print(f"Connect to {host} failed or time out:{e}")
+                return host, cpu_usage, memory_usage, active_users, active_ip
+        except (asyncssh.Error, asyncio.TimeoutError) as exc:
+            print(f"Connect to {host} failed or timed out: {exc}")
             return None
 
     result = await try_connect(DEFAULT_USERNAME, DEFAULT_PASSWORD)
     if result is None:
         result = await try_connect(SECONDARY_USERNAME, SECONDARY_PASSWORD)
     if result is None:
-        print(f"Error connecting to {host}: Both credential sets failed.")
-        return (host, "Error", "Error", [], "Error")
+        print(f"Error connecting to {host}: both credential sets failed.")
+        return host, "Error", "Error", [], "Error"
     return result
 
 
 async def update_database(
-    host, cpu_usage, memory_usage, active_users, active_ip, current_time, db_pool
-):
+    host: str,
+    cpu_usage,
+    memory_usage,
+    active_users: List[str],
+    active_ip: List[str],
+    current_time: str,
+    db_pool,
+) -> None:
+    """
+    Persist server metrics to the database.
+
+    Parameters:
+        host (str): Server host.
+        cpu_usage: CPU usage percentage or "Unknown".
+        memory_usage: Memory usage percentage or "Unknown".
+        active_users (List[str]): Active user list.
+        active_ip (List[str]): Active IP list.
+        current_time (str): Timestamp string.
+        db_pool: Aiomysql connection pool.
+    Returns:
+        None
+    Raises:
+        None
+    """
     async with db_pool.acquire() as conn:
         async with conn.cursor() as cur:
-            # 获取或创建 server_id
             await cur.execute("SELECT server_id FROM servers WHERE host = %s", (host,))
             server_id = await cur.fetchone()
             if server_id is None:
@@ -128,112 +154,112 @@ async def update_database(
                 await cur.execute("SELECT LAST_INSERT_ID()")
                 server_id = await cur.fetchone()
             server_id = server_id[0]
-            cpu_usage = (
-                round(float(cpu_usage), 2) if cpu_usage != "Unknown" else "Unknown"
-            )
-            memory_usage = (
-                round(memory_usage, 2) if memory_usage != "Unknown" else "Unknown"
-            )
-            # 将磁盘空间从字节转换为 GB
 
-            # 插入 CPU 使用率
+            cpu_value = round(float(cpu_usage), 2) if cpu_usage != "Unknown" else "Unknown"
+            mem_value = round(memory_usage, 2) if memory_usage != "Unknown" else "Unknown"
+
             await cur.execute(
                 "INSERT INTO cpu_usages (server_id, cpu_usage, timestamp) VALUES (%s, %s, %s)",
-                (server_id, cpu_usage, current_time),
+                (server_id, cpu_value, current_time),
             )
-            # 插入内存使用率
             await cur.execute(
                 "INSERT INTO memory_usages (server_id, memory_usage, timestamp) VALUES (%s, %s, %s)",
-                (server_id, memory_usage, current_time),
+                (server_id, mem_value, current_time),
             )
-            # 插入活跃用户
+
             for user in active_users:
                 await cur.execute(
                     "INSERT INTO active_users (server_id, username, timestamp) VALUES (%s, %s, %s)",
                     (server_id, user, current_time),
                 )
-            # 插入活跃ip
+
             for ip in active_ip:
-                try:
-                    # 檢查 IP 是否存在於 user_ip_map
-                    await cur.execute(
-                        "SELECT 1 FROM user_ip_map WHERE ip_address = %s", (ip,)
-                    )
-                    exists = await cur.fetchone()
-                    if not exists:
-                        print(
-                            f"Error: IP {ip} does not exist in user_ip_map and cannot be inserted into active_ip for server {server_id}"
-                        )
-                        continue  # 跳過此 IP
-
-                    # 插入 active_ip
-                    await cur.execute(
-                        """INSERT INTO active_ip (server_id, ip_address, timestamp)
-                           VALUES (%s, %s, %s)
-                           ON DUPLICATE KEY UPDATE
-                           ip_address = VALUES(ip_address),
-                           timestamp = VALUES(timestamp)
-                        """,
-                        (server_id, ip, current_time),
-                    )
-                except Exception as e:
-                    print(f"插入 IP {ip} 時發生錯誤：{e}")
-            # await conn.commit()
+                await cur.execute(
+                    """
+                    INSERT INTO active_ip (server_id, ip_address, timestamp) VALUES (%s, %s, %s) AS new
+                    ON DUPLICATE KEY UPDATE
+                        ip_address = new.ip_address,
+                        timestamp = new.timestamp
+                    """,
+                    (server_id, ip, current_time),
+                )
 
 
-async def query_latest_check_time(db_pool):
+async def query_latest_check_time(db_pool) -> Optional[str]:
+    """
+    Fetch the latest connectivity check timestamp.
+
+    Parameters:
+        db_pool: Aiomysql connection pool.
+    Returns:
+        Optional[str]: Latest check time or None.
+    Raises:
+        None
+    """
     try:
         async with db_pool.acquire() as conn:
             async with conn.cursor() as cursor:
-                query = (
-                    "SELECT MAX(last_checked) AS last_checked FROM server_connectivity"
-                )
+                query = "SELECT MAX(last_checked) AS last_checked FROM server_connectivity"
                 await cursor.execute(query)
                 result = await cursor.fetchone()
-                # print(f"fetchall:{result}")
                 return result[0] if result else None
-    except Exception as e:
-        print(f"Error fetching latest check time: {e}")
+    except Exception as exc:
+        print(f"Error fetching latest check time: {exc}")
         return None
 
 
-async def get_servers_from_db(latest_check_time, db_pool):
-    servers = []
+async def get_servers_from_db(latest_check_time: Optional[str], db_pool) -> List[str]:
+    """
+    Fetch connectable servers based on the latest connectivity check.
+
+    Parameters:
+        latest_check_time (Optional[str]): Latest check timestamp.
+        db_pool: Aiomysql connection pool.
+    Returns:
+        List[str]: List of server hosts.
+    Raises:
+        None
+    """
+    servers: List[str] = []
     if latest_check_time:
         async with db_pool.acquire() as conn:
             async with conn.cursor() as cur:
-                # 使用最新的检查时间来过滤服务器
                 await cur.execute(
                     """
                     SELECT s.host
                     FROM servers s
                     JOIN server_connectivity sc ON s.server_id = sc.server_id
                     WHERE sc.last_checked = %s AND sc.is_connectable = TRUE
-                """,
+                    """,
                     (latest_check_time,),
                 )
                 server_records = await cur.fetchall()
                 for record in server_records:
-                    host = record[0]
-                    servers.append(host)
+                    servers.append(record[0])
     return servers
 
 
-async def main():
+async def main() -> None:
+    """
+    Orchestrate usage collection and database updates.
+
+    Parameters:
+        None
+    Returns:
+        None
+    Raises:
+        None
+    """
     async with get_db_pool() as db_pool:
-        # 先获取最新的检查时间
         latest_check_time = await query_latest_check_time(db_pool)
-        # print(latest_check_time)
-        # 然后使用这个时间戳来获取服务器列表
         server_ips = await get_servers_from_db(latest_check_time, db_pool)
-        # for ip in server_ips:
-        #      print(ip)
         if not server_ips:
             print("No connectable servers found in the database.")
             return
-        # 获取服务器资源使用情况并更新数据库
+
         tasks = [get_server_usage(ip) for ip in server_ips]
         results = await asyncio.gather(*tasks)
+
         update_tasks = []
         current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         for result in results:
@@ -250,12 +276,12 @@ async def main():
                         db_pool,
                     )
                 )
+
         await asyncio.gather(*update_tasks)
 
 
-# 程序入口
 if __name__ == "__main__":
     try:
         asyncio.run(main())
-    except Exception as e:
-        print(f"An error occurred: {e}")
+    except Exception as exc:
+        print(f"An error occurred: {exc}")
